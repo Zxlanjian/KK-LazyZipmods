@@ -16,18 +16,28 @@ start to "Studio instance seems to be initialized":
 | Build | Startup |
 | --- | --- |
 | Upstream Sideloader | 58 807 ms |
-| This fork, lazy loading on | **34 845 ms** |
+| This fork, lazy loading off (eager) | 64 410 ms |
+| This fork, lazy loading on | **35 465 ms** |
 
-That is **≈24 s faster**, and the scene contents are identical: the same 36 mod items resolve, and
-the same 2 items are missing because those mods are genuinely not installed.
+That is **≈24–29 s faster**, and the scene contents are identical: the same 36 mod items resolve,
+and the same 2 items are missing because those mods are genuinely not installed. (Absolute numbers
+vary a few seconds between runs and with machine load; the lazy/eager gap is stable.)
+
+Only the *character* item lists and the *per-item* Studio lists are deferred. Everything the Studio
+UI reads exactly once at boot stays eager, because those panels never refresh: the LUT dropdown
+(`Studio.FilterList.Init`), the shadow dropdown (`Studio.LightList.Awake`), the map dropdown
+(`Studio.MapList.Init`) and the BGM / item group lists. Registering those eagerly costs about 2 s and
+is what keeps the mod entries visible in those dropdowns.
 
 ### How it works
 
 At startup the fork still enumerates every archive, still registers every AssetBundle and every
-`.png` index, and still parses every manifest — only the *list data* (`abdata/list/characustom`,
-`abdata/studio/info`, map CSV, bone lists) is withheld. That is safe because the card itself records
-which zipmods it references (the Universal Auto Resolver Extensible Save data), so the exact subset
-can be resolved from the card file before the card is read.
+`.png` index, and still parses every manifest. It also still registers the Studio lists the UI reads
+once at boot. Only the expensive *list data* — `abdata/list/characustom` and the per-item
+`abdata/studio/info` lists (`ItemList_`, `Voice_`, `Anime_`, `HAnime_`, `ItemBoneList_`) — is
+withheld. That is safe because the card itself records which zipmods it references (the Universal
+Auto Resolver Extensible Save data), so the exact subset can be resolved from the card file before
+the card is read.
 
 When a character card, coordinate card or Studio scene is about to load, the fork:
 
@@ -79,12 +89,20 @@ the hook map of the game's list loading, and the Studio item injection path.
 | 版本 | 启动耗时 |
 | --- | --- |
 | 上游 Sideloader | 58 807 ms |
-| 本分支（懒加载开启） | **34 845 ms** |
+| 本分支（懒加载关闭 / eager） | 64 410 ms |
+| 本分支（懒加载开启） | **35 465 ms** |
 
-**快约 24 秒**，且场景内容完全一致：同样是 36 个 mod 物品解析成功，同样只有 2 个缺失（那两个 mod 本来就没装）。
+**快约 24–29 秒**，且场景内容完全一致：同样是 36 个 mod 物品解析成功，同样只有 2 个缺失（那两个 mod 本来就没装）。
+绝对值每次会有几秒浮动，lazy 与 eager 的差距稳定。
+
+只推迟**角色物品列表**与**逐物品类 Studio 列表**。Studio 界面在启动时只读一次的字典仍然保持启动注入，
+因为这些面板不会刷新：LUT 下拉（`Studio.FilterList.Init`）、阴影下拉（`Studio.LightList.Awake`）、
+地图下拉（`Studio.MapList.Init`），以及 BGM / 物品分组列表。这部分 eager 注册约多花 2 秒，
+换来的是这些下拉框里 mod 条目不再缺失。
 
 原理：启动时仍然枚举全部归档、仍然注册全部 AssetBundle 与 `.png` 索引、仍然解析全部 manifest，
-只**不注入列表数据**（`abdata/list/characustom`、`abdata/studio/info`、map CSV、骨骼列表）。
+也仍然注入 Studio 界面只读一次的那几类列表。只**不注入真正昂贵的列表数据**：`abdata/list/characustom`，
+以及逐物品的 `abdata/studio/info`（`ItemList_`、`Voice_`、`Anime_`、`HAnime_`、`ItemBoneList_`）。
 卡片本身就记录了它引用了哪些 zipmod（UAR 的 ExtSave 数据），所以在读卡前可以精确算出所需子集：
 读出 PNG 尾部的 zipmod GUID 列表 → 只注入这些 zipmod 的列表 → 重建对应的 UAR 映射 →
 补跑一次饰品转 Studio 物品的转换。激活按 GUID 幂等且会话内累积，之后加载别的卡只补增量。

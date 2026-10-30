@@ -408,11 +408,15 @@ namespace Sideloader
                     Manifests[manifest.GUID] = manifest;
 
                     bundlesToLoad.AddRange(zipmod.BundleInfos);
-                    // In lazy mode the list data is only injected once something actually needs it,
-                    // see Sideloader.ActivateGuids. Deferring this is what removes the ~25s the
-                    // game spends walking every mod list at boot.
+                    // The Studio side is cheap and several Studio panels build their entries once
+                    // at boot without ever refreshing, so it always stays eager.
+                    AddStudioLists(zipmod);
+                    // The character side is what costs the ~25s: every item name is queued for
+                    // translation and third party plugins derive data from the live ChaListControl.
+                    // In lazy mode it is injected once something actually needs it, see
+                    // Sideloader.ActivateGuids.
                     if (!LazyLoadingEnabled.Value)
-                        AddAllLists(zipmod, gatheredResolutionInfos);
+                        AddCharacterLists(zipmod, gatheredResolutionInfos);
                     BuildPngFolderList(zipmod);
 
                     gatheredMigrationInfos.AddRange(manifest.MigrationList);
@@ -470,15 +474,16 @@ namespace Sideloader
         }
 
         /// <summary>
-        /// Registers the list data of one zipmod: character item lists, Studio lists (studio/info and
-        /// item bone lists) and map excel data.
-        /// This is the expensive part of the startup pass. Every registered studio/info bundle is
-        /// walked by the game while it builds its own item dictionary, and every character item name
-        /// is queued for translation; together that is roughly 25 seconds with a large mods folder.
-        /// With lazy loading enabled the whole method is deferred until a card or scene that
-        /// references the zipmod is loaded, see <see cref="ActivateGuids"/>.
+        /// Registers the character item lists of one zipmod, i.e. everything that ends up in the
+        /// live ChaListControl.
+        /// This is the expensive half of the startup pass: every item name is queued for
+        /// translation, and plugins that derive their own data from ChaListControl (for example
+        /// AccessoriesToStudioItems, which converts every accessory into a Studio item) walk all of
+        /// it right after the injection. Together that is roughly 25 seconds with a large mods
+        /// folder. With lazy loading enabled this half is deferred until a card that references the
+        /// zipmod is loaded, see <see cref="ActivateGuids"/>.
         /// </summary>
-        private static void AddAllLists(ZipmodInfo zipmod, List<ResolveInfo> gatheredResolutionInfos)
+        private static void AddCharacterLists(ZipmodInfo zipmod, List<ResolveInfo> gatheredResolutionInfos)
         {
             var manifest = zipmod.Manifest;
             foreach (var chaListData in zipmod.CharaLists)
@@ -486,9 +491,59 @@ namespace Sideloader
                 UniversalAutoResolver.GenerateResolutionInfo(manifest, chaListData, gatheredResolutionInfos);
                 Lists.ExternalDataList.Add(chaListData);
             }
+        }
+
+        /// <summary>
+        /// Studio list types that have to be registered at startup even in lazy mode.
+        ///
+        /// Everything except the per-item lists. The reason is not just the panels that enumerate a
+        /// dictionary once at boot (Studio.FilterList.Init for LUT, Studio.LightList.Awake for
+        /// shadows, Studio.MapList.Init, Studio.BGMControl.Awake, Studio.ItemGroupList.Start): the
+        /// boot coroutine Studio.Info.LoadExcelDataCoroutine walks the bundles one by one, and
+        /// leaving the category/group types out makes it bail on the ones whose group is missing.
+        /// Measured: dropping itemgroup/itemcategory/animegroup/animecategory/voicegroup/voicecategory/
+        /// accessorypoint/accessorypointgroup/bone/handanime took dicFilterLoadInfo from 345 entries
+        /// (identical to eager mode) down to 42, and dicMapLoadInfo from 303 down to 42.
+        ///
+        /// The types that are NOT in here are the per-item ones: itemlist, voice, anime, hanime and
+        /// itembonelist. Those are the expensive ones (itemlist alone is roughly 77k Studio items in
+        /// a large mods folder) and they are looked up on demand by Studio.AddObjectItem and the
+        /// animation panels, so they can wait, see <see cref="ActivateStudioLists"/>.
+        /// </summary>
+        private static readonly string[] EagerStudioListTypes =
+        {
+            "filter", "light", "map", "bgm",
+            "itemgroup", "itemcategory",
+            "animegroup", "animecategory",
+            "voicegroup", "voicecategory",
+            "accessorypoint", "accessorypointgroup",
+            "bone", "handanime",
+        };
+
+        /// <summary>True when the given Studio list has to be registered at startup rather than on demand.</summary>
+        internal static bool IsEagerStudioListType(string listType)
+        {
+            if (string.IsNullOrEmpty(listType)) return false;
+            for (int i = 0; i < EagerStudioListTypes.Length; i++)
+                if (string.Equals(EagerStudioListTypes[i], listType, StringComparison.Ordinal))
+                    return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Registers the Studio lists of one zipmod that the game only ever reads once, plus its map
+        /// excel data. See <see cref="EagerStudioListTypes"/> for why these cannot wait.
+        /// The remaining Studio lists (the per-item ones) are registered on demand by
+        /// <see cref="ActivateStudioLists"/> when a scene that needs them is loaded.
+        /// </summary>
+        private static void AddStudioLists(ZipmodInfo zipmod)
+        {
 #if !EC
+            var manifest = zipmod.Manifest;
             foreach (var studioListData in zipmod.StudioLists)
             {
+                if (!IsEagerStudioListType(ListTypeOf(studioListData))) continue;
+
                 UniversalAutoResolver.GenerateStudioResolutionInfo(manifest, studioListData);
                 if (!Lists.ExternalStudioDataList.TryGetValue(studioListData.AssetBundleName, out var listOfLists))
                 {
@@ -500,6 +555,30 @@ namespace Sideloader
             foreach (var mapListData in zipmod.MapLists)
             {
                 Lists.AddExcelDataCSV(mapListData);
+            }
+#endif
+        }
+
+        /// <summary>
+        /// Registers the Studio lists of one zipmod that the game only looks up on demand, i.e. the
+        /// per-item ones (itemlist, voice, anime, hanime, itembonelist). Called when a scene that
+        /// references the zipmod is loaded, before the scene is parsed.
+        /// </summary>
+        internal static void AddDeferredStudioLists(ZipmodInfo zipmod)
+        {
+#if !EC
+            var manifest = zipmod.Manifest;
+            foreach (var studioListData in zipmod.StudioLists)
+            {
+                if (IsEagerStudioListType(ListTypeOf(studioListData))) continue;
+
+                UniversalAutoResolver.GenerateStudioResolutionInfo(manifest, studioListData);
+                if (!Lists.ExternalStudioDataList.TryGetValue(studioListData.AssetBundleName, out var listOfLists))
+                {
+                    listOfLists = new List<Lists.StudioListData>();
+                    Lists.ExternalStudioDataList.Add(studioListData.AssetBundleName, listOfLists);
+                }
+                listOfLists.Add(studioListData);
             }
             foreach (var boneListData in zipmod.BoneLists)
             {

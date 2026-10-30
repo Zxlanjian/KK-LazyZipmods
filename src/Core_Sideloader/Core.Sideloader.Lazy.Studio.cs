@@ -147,7 +147,13 @@ namespace Sideloader
             var bundles = new HashSet<string>(StringComparer.Ordinal);
             foreach (var zipmod in zipmods)
             {
-                foreach (var list in zipmod.StudioLists) bundles.Add(list.AssetBundleName);
+                // The once-read list types were registered eagerly at startup and the game's own
+                // boot coroutine already turned them into dictionary entries. Re-injecting them
+                // here would only cost time.
+                foreach (var list in zipmod.StudioLists)
+                    if (!IsEagerStudioListType(ListTypeOf(list)))
+                        bundles.Add(list.AssetBundleName);
+
                 foreach (var list in zipmod.BoneLists) bundles.Add(list.AssetBundleName);
             }
 
@@ -259,6 +265,9 @@ namespace Sideloader
             {
                 var listType = ListTypeOf(data);
                 if (listType.Length == 0) continue;
+
+                // Registered eagerly at startup, so the game already read it once. Do not repeat it.
+                if (IsEagerStudioListType(listType)) continue;
 
                 List<Lists.StudioListData> bucket;
                 if (!byType.TryGetValue(listType, out bucket))

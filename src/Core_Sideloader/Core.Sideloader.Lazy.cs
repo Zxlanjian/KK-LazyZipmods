@@ -1,4 +1,4 @@
-using BepInEx.Configuration;
+﻿using BepInEx.Configuration;
 using HarmonyLib;
 using KKLazyZipmods.CardScan;
 using Sideloader.AutoResolver;
@@ -9,8 +9,6 @@ using System.IO;
 using System.Linq;
 #if KK || KKS || EC
 using ChaCustom;
-#elif AI || HS2
-using AIChara;
 #endif
 
 namespace Sideloader
@@ -132,7 +130,10 @@ namespace Sideloader
                 {
                     // Lists are already parsed: cache hits deserialize them, cache misses ran
                     // LoadAllLists on the background loading thread. Only the registration was deferred.
-                    AddAllLists(zipmod, addedResolveInfos);
+                    // The Studio list types that the game reads exactly once were already registered
+                    // at startup; what is left is the character half and the per-item Studio lists.
+                    AddCharacterLists(zipmod, addedResolveInfos);
+                    AddDeferredStudioLists(zipmod);
                     LazyActivatedZipmods.Add(zipmod);
                     activatedNames.Add(zipmod.Manifest.Name ?? zipmod.RelativeFileName);
                 }
@@ -171,7 +172,10 @@ namespace Sideloader
 
 #if !EC
             // Studio side: dicItemLoadInfo is a completely separate data source from ChaListControl.
+            // Only the per-item lists registered by AddDeferredStudioLists need pushing, the
+            // once-read panels were already fed by the game's own boot coroutine.
             ActivateStudioLists(activated);
+            // Accessory derived items are built from the character lists that just became live.
             RefreshAccessoryStudioItems();
 #endif
 
