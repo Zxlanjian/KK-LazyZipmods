@@ -1,8 +1,9 @@
 name: CI
 
-on: 
+on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
@@ -10,7 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
-      - run: dotnet build BepisPlugins.sln --configuration Release
+      # This fork targets Koikatu / CharaStudio. The other game projects in the
+      # solution are inherited from upstream and do not build as-is on master
+      # (Core.Sideloader.HotReload.cs references Studio types without the guards
+      # the EC / AI / HS2 builds need), so build the KK target only.
+      - run: dotnet build src/KK_Sideloader/KK_Sideloader.csproj --configuration Release
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.repository.name }}_${{ github.sha }}

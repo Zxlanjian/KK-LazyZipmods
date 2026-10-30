@@ -1,4 +1,4 @@
-﻿using BepInEx.Configuration;
+using BepInEx.Configuration;
 using HarmonyLib;
 using KKLazyZipmods.CardScan;
 using Sideloader.AutoResolver;
@@ -9,6 +9,8 @@ using System.IO;
 using System.Linq;
 #if KK || KKS || EC
 using ChaCustom;
+#elif AI || HS2
+using AIChara;
 #endif
 
 namespace Sideloader
