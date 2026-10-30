@@ -31,7 +31,9 @@ namespace Sideloader
     [BepInDependency(ExtensibleSaveFormat.ExtendedSave.GUID, "18.2.0.3")]
 #elif KK
     // Keep this local fork compatible with the ExtensibleSaveFormat version already shipped in the target game.
-    [BepInDependency(ExtensibleSaveFormat.ExtendedSave.GUID, "21.1.2")]
+    // Configurable so the same source builds against the 21.1.2 upstream floor or the 21.1.1 floor used by
+    // Koikatsu RX22, whose ExtSave exposes an identical public API.
+    [BepInDependency(ExtensibleSaveFormat.ExtendedSave.GUID, BepisPlugins.Constants.ExtSaveMinimumVersion)]
 #else
     [BepInDependency(ExtensibleSaveFormat.ExtendedSave.GUID, ExtensibleSaveFormat.ExtendedSave.Version)]
 #endif
@@ -135,6 +137,16 @@ namespace Sideloader
                     "Remove unused AssetBundle shadow files older than this many days at startup. Set to 0 to disable age-based cleanup; the size limit still applies. Restart required.",
                     new AcceptableValueRange<int>(0, 3650)));
             InitializeHotReloadGui();
+
+            InitLazyLoadingConfig();
+
+            // Lazy loading needs its own hooks because the activation has to run before the game
+            // reads a card or a scene, which is earlier than anything Sideloader patches today.
+            var lazyHarmony = Harmony.CreateAndPatchAll(typeof(LazyHooks), GUID + ".Lazy");
+            LazyHooks.Install(lazyHarmony);
+#if !EC
+            InstallStudioLazyHooks(lazyHarmony);
+#endif
 
             BundleDiskCache.Initialize(HotReloadBundleCacheSizeGB.Value, HotReloadBundleCacheRetentionDays.Value);
 
@@ -396,7 +408,11 @@ namespace Sideloader
                     Manifests[manifest.GUID] = manifest;
 
                     bundlesToLoad.AddRange(zipmod.BundleInfos);
-                    AddAllLists(zipmod, gatheredResolutionInfos);
+                    // In lazy mode the list data is only injected once something actually needs it,
+                    // see Sideloader.ActivateGuids. Deferring this is what removes the ~25s the
+                    // game spends walking every mod list at boot.
+                    if (!LazyLoadingEnabled.Value)
+                        AddAllLists(zipmod, gatheredResolutionInfos);
                     BuildPngFolderList(zipmod);
 
                     gatheredMigrationInfos.AddRange(manifest.MigrationList);
@@ -432,6 +448,10 @@ namespace Sideloader
             UniversalAutoResolver.ResolveFaceSkins();
 #endif
 
+            // The registration pass is over: from here on nothing else will inject list data, so
+            // latch the decision that makes card/scene load perform the injection instead.
+            MarkLazyStartupDeferred();
+
             BuildPngOnlyFolderList();
 
 #pragma warning disable CS0618 // Type or member is obsolete
@@ -449,6 +469,15 @@ namespace Sideloader
                 Logger.LogWarning("Could not load " + failedPaths.Length + " mods, see previous warnings for more information. File names of skipped archives:\n" + string.Join(" | ", failedPaths));
         }
 
+        /// <summary>
+        /// Registers the list data of one zipmod: character item lists, Studio lists (studio/info and
+        /// item bone lists) and map excel data.
+        /// This is the expensive part of the startup pass. Every registered studio/info bundle is
+        /// walked by the game while it builds its own item dictionary, and every character item name
+        /// is queued for translation; together that is roughly 25 seconds with a large mods folder.
+        /// With lazy loading enabled the whole method is deferred until a card or scene that
+        /// references the zipmod is loaded, see <see cref="ActivateGuids"/>.
+        /// </summary>
         private static void AddAllLists(ZipmodInfo zipmod, List<ResolveInfo> gatheredResolutionInfos)
         {
             var manifest = zipmod.Manifest;

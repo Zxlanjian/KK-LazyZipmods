@@ -99,6 +99,17 @@ namespace Sideloader.AutoResolver
             RebuildStudioResolutionLookups();
         }
 
+        /// <summary>
+        /// Drops every Studio resolve info belonging to a single item group. Used to rebuild data
+        /// that a third party plugin derives from the live ChaListControl.
+        /// </summary>
+        internal static int RemoveStudioResolutionInfosByGroup(int group)
+        {
+            int removed = _LoadedStudioResolutionInfos.RemoveAll(x => x.Group == group);
+            if (removed > 0) RebuildStudioResolutionLookups();
+            return removed;
+        }
+
         internal static void RebuildStudioResolutionLookups()
         {
             StudioResolutionInfoLocalSlotLookup.Clear();

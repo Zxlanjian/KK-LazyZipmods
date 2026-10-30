@@ -31,5 +31,11 @@
     <Compile Include="$(MSBuildThisFileDirectory)UniversalAutoResolver\Core.UAR.StructReference.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)UniversalAutoResolver\Core.UAR.StructValue.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Core.Sideloader.ZipmodInfo.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)CardScan\ByteSource.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)CardScan\CardScanResult.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)CardScan\CardScanner.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)CardScan\MsgPack.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Core.Sideloader.Lazy.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Core.Sideloader.Lazy.Studio.cs" />
   </ItemGroup>
 </Project>

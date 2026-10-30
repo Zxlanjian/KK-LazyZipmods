@@ -1,0 +1,7 @@
+<Project>
+  <!--
+    Stops MSBuild from inheriting the repository root Directory.Build.props: this tool is a plain
+    net8 console app and has nothing in common with the net35 game plugins (target framework,
+    output layout, packaging).
+  -->
+</Project>

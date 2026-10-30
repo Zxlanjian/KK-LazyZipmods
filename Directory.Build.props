@@ -19,6 +19,12 @@
 
 		<RootNamespace>BepisPlugins</RootNamespace>
 
+		<!-- Minimum ExtensibleSaveFormat version the KK Sideloader hard-depends on.
+		     Upstream pins 21.1.2. The Koikatsu RX22 pack ships 21.1.1, whose public API is
+		     byte-for-byte identical to 21.1.2 (verified member-by-member with Cecil), so the
+		     local build lowers the floor to 21.1.1 instead of forcing an ExtSave upgrade. -->
+		<ExtSaveMinimumVersion Condition="'$(ExtSaveMinimumVersion)' == ''">21.1.1</ExtSaveMinimumVersion>
+
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 		<!-- Keep all generated trees excluded when release builds use obj\standard or obj\legacy. -->
 		<DefaultItemExcludes>$(DefaultItemExcludes);obj\**</DefaultItemExcludes>
@@ -79,6 +85,7 @@
         public const string Description = "$(AssemblyTitle)"%3B
         public const string Website = "$(Authors)"%3B
         public const string Copyright = "$(Copyright)"%3B
+        public const string ExtSaveMinimumVersion = "$(ExtSaveMinimumVersion)"%3B
     }
 }]]>
 			</GeneratedText>

@@ -3,6 +3,105 @@ A collection of essential [BepInEx](https://github.com/BepInEx/BepInEx) plugins 
 
 If you wish to contribute or need help, check the #help channel on the [Koikatsu discord server](https://discord.gg/hevygx6).
 
+## Lazy zipmod loading (this fork)
+
+This fork adds **lazy zipmod list registration** to the Koikatu Sideloader, on top of the hot reload
+extension below. With a large mods folder, startup spends most of its time injecting the item lists
+of every installed zipmod and then letting the game walk them; this fork defers that injection until
+a card or scene that actually needs those mods is loaded.
+
+Measured on a BetterRepack RX22 install with **15 045 archives / 224 GB** in `mods\`, CharaStudio
+start to "Studio instance seems to be initialized":
+
+| Build | Startup |
+| --- | --- |
+| Upstream Sideloader | 58 807 ms |
+| This fork, lazy loading on | **34 845 ms** |
+
+That is **≈24 s faster**, and the scene contents are identical: the same 36 mod items resolve, and
+the same 2 items are missing because those mods are genuinely not installed.
+
+### How it works
+
+At startup the fork still enumerates every archive, still registers every AssetBundle and every
+`.png` index, and still parses every manifest — only the *list data* (`abdata/list/characustom`,
+`abdata/studio/info`, map CSV, bone lists) is withheld. That is safe because the card itself records
+which zipmods it references (the Universal Auto Resolver Extensible Save data), so the exact subset
+can be resolved from the card file before the card is read.
+
+When a character card, coordinate card or Studio scene is about to load, the fork:
+
+1. reads the zipmod GUID list straight out of the PNG's ExtSave payload (a small built-in
+   MessagePack reader, no game round-trip),
+2. injects the list data of exactly those zipmods into `ChaListControl` / `Studio.Info`,
+3. rebuilds the Universal Auto Resolver mappings for the newly activated subset,
+4. re-runs the accessory-to-Studio-item conversion, so accessory-derived Studio items keep working.
+
+Nothing is deactivated afterwards; activation is per-GUID idempotent and accumulates for the
+session, so loading a second card only adds what it needs.
+
+### Config
+
+`BepInEx\config\com.bepis.bepinex.sideloader.cfg`, section `[Lazy Loading]`:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `Enabled` | `true` | Defer list injection to card/scene load. Turn off for upstream behaviour. |
+| `Activate on character card load` | `true` | Activate the zipmods named by the character / coordinate card being loaded. |
+| `Activate on Studio scene load` | `true` | Activate the zipmods named by the Studio scene being loaded. |
+| `Verbose logging` | `false` | Log every activation with the zipmod names involved. |
+
+### Limitations
+
+- The **first** load of a given card or scene costs an extra ~1–3 s while its zipmods are activated.
+  Subsequent loads are free.
+- Cards that carry no zipmod GUID list (old cards, or cards produced by tools that strip the UAR
+  data) cannot be resolved ahead of time. Their mod items are missing — exactly as they would be
+  with a plain Sideloader and those mods uninstalled.
+- Characters embedded in a Studio scene have no separate file path, so they rely on the scene's own
+  GUID list. A scene that embeds a character wearing a mod not listed on the scene will still lose
+  those items.
+- The ~19.7 s BepInEx chainloader cost is untouched; that is plugin count, not mod count.
+
+See [`docs/`](docs) for the reverse-engineering notes this was built from: the card file format,
+the hook map of the game's list loading, and the Studio item injection path.
+
+<details>
+<summary>简体中文</summary>
+
+本分支在原 Sideloader（含热重载扩展）之上加入 **zipmod 列表懒加载**。mods 数量大时，启动耗时几乎全花在
+「把所有 zipmod 的物品列表注入游戏、再让游戏自己遍历一遍」上；本分支把这部分推迟到真正加载需要这些 mod 的
+卡片 / 场景之前。
+
+实测环境：BetterRepack RX22，`mods\` 下 **15045 个归档 / 224 GB**，CharaStudio 从启动到
+`Studio instance seems to be initialized`：
+
+| 版本 | 启动耗时 |
+| --- | --- |
+| 上游 Sideloader | 58 807 ms |
+| 本分支（懒加载开启） | **34 845 ms** |
+
+**快约 24 秒**，且场景内容完全一致：同样是 36 个 mod 物品解析成功，同样只有 2 个缺失（那两个 mod 本来就没装）。
+
+原理：启动时仍然枚举全部归档、仍然注册全部 AssetBundle 与 `.png` 索引、仍然解析全部 manifest，
+只**不注入列表数据**（`abdata/list/characustom`、`abdata/studio/info`、map CSV、骨骼列表）。
+卡片本身就记录了它引用了哪些 zipmod（UAR 的 ExtSave 数据），所以在读卡前可以精确算出所需子集：
+读出 PNG 尾部的 zipmod GUID 列表 → 只注入这些 zipmod 的列表 → 重建对应的 UAR 映射 →
+补跑一次饰品转 Studio 物品的转换。激活按 GUID 幂等且会话内累积，之后加载别的卡只补增量。
+
+配置在 `BepInEx\config\com.bepis.bepinex.sideloader.cfg` 的 `[Lazy Loading]` 段：
+`Enabled`（默认 true）、`Activate on character card load`、`Activate on Studio scene load`、`Verbose logging`。
+
+已知限制：某张卡/场景**首次**加载会多花约 1–3 秒（激活它要的那几十个 zipmod），之后免费；
+不带 zipmod GUID 列表的老卡无法提前解析，其 mod 物品会缺失（与普通 Sideloader 未装该 mod 时表现一致）；
+场景内嵌角色没有独立文件路径，只能依赖场景卡自己的 GUID 列表；Chainloader 那约 19.7 秒与 mod 数无关，未改动。
+
+逆向笔记见 [`docs/`](docs)：卡片文件格式、游戏列表加载的钩子地图、Studio 物品注入路径。
+
+</details>
+
+---
+
 ## Narushio Sideloader extensions
 
 [English](#english) · [日本語](#日本語) · [简体中文](#简体中文)
